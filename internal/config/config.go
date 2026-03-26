@@ -16,12 +16,36 @@ type Config struct {
 	// Session configuration
 	Session SessionConfig `yaml:"session"`
 
+	// Server configuration for the PWA/WebSocket server
+	Server ServerConfig `yaml:"server"`
+
 	// Hostname is used to prefix messages and identify this machine.
 	// Auto-detected from OS hostname if empty.
 	Hostname string `yaml:"hostname"`
 
 	// DataDir is where sessions, logs, and state are stored.
 	DataDir string `yaml:"data_dir"`
+}
+
+// ServerConfig holds configuration for the HTTP/WebSocket PWA server.
+type ServerConfig struct {
+	// Enabled controls whether the HTTP/WebSocket server starts
+	Enabled bool `yaml:"enabled"`
+
+	// Host to bind to. Use "0.0.0.0" to listen on all interfaces (including Tailscale).
+	Host string `yaml:"host"`
+
+	// Port to listen on
+	Port int `yaml:"port"`
+
+	// Token is an optional bearer token for authentication.
+	// If empty, no auth is required (rely on Tailscale for network security).
+	Token string `yaml:"token"`
+
+	// TLSCert and TLSKey are optional paths for TLS. Leave empty for plain HTTP
+	// (Tailscale provides encryption at the network layer).
+	TLSCert string `yaml:"tls_cert"`
+	TLSKey  string `yaml:"tls_key"`
 }
 
 // SignalConfig holds Signal-specific configuration.
@@ -72,6 +96,11 @@ func DefaultConfig() *Config {
 			InputIdleTimeout: 10,
 			TailLines:        20,
 			ClaudeCodeBin:    "claude",
+		},
+		Server: ServerConfig{
+			Enabled: true,
+			Host:    "0.0.0.0",
+			Port:    8080,
 		},
 	}
 }

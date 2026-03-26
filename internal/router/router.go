@@ -33,10 +33,19 @@ func NewRouter(hostname, groupID string, backend signal.SignalBackend, manager *
 
 // Run starts the router, subscribing to Signal messages and dispatching them.
 // Blocks until ctx is cancelled.
+// Note: if callbacks have already been set externally (e.g. by main.go when
+// composing with the HTTP server), this will overwrite them. Call
+// SetDefaultCallbacks before Run if you want the Signal-only behaviour.
 func (r *Router) Run(ctx context.Context) error {
-	// Register session callbacks
-	r.manager.SetStateChangeHandler(r.handleStateChange)
-	r.manager.SetNeedsInputHandler(r.handleNeedsInput)
+	// Only set default callbacks if none have been wired up yet.
+	// When the HTTP server is enabled, main.go sets combined callbacks before
+	// calling Run, so we skip re-setting them here.
+	if r.manager.StateChangeHandler() == nil {
+		r.manager.SetStateChangeHandler(r.HandleStateChange)
+	}
+	if r.manager.NeedsInputHandler() == nil {
+		r.manager.SetNeedsInputHandler(r.HandleNeedsInput)
+	}
 
 	// Subscribe to Signal messages
 	return r.backend.Subscribe(ctx, r.handleMessage)
@@ -240,16 +249,18 @@ func (r *Router) handleImplicitSend(text string) {
 	}
 }
 
-// handleStateChange is called by the session manager when session state changes.
-func (r *Router) handleStateChange(sess *session.Session, oldState session.State) {
+// HandleStateChange is called by the session manager when session state changes.
+// It is exported so that main.go can compose it with other callbacks (e.g. WS broadcast).
+func (r *Router) HandleStateChange(sess *session.Session, oldState session.State) {
 	if sess.Hostname != r.hostname {
 		return
 	}
 	r.send(fmt.Sprintf("[%s][%s] State: %s → %s", r.hostname, sess.ID, oldState, sess.State))
 }
 
-// handleNeedsInput is called when a session is waiting for user input.
-func (r *Router) handleNeedsInput(sess *session.Session, prompt string) {
+// HandleNeedsInput is called when a session is waiting for user input.
+// It is exported so that main.go can compose it with other callbacks (e.g. WS broadcast).
+func (r *Router) HandleNeedsInput(sess *session.Session, prompt string) {
 	if sess.Hostname != r.hostname {
 		return
 	}

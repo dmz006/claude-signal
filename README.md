@@ -122,28 +122,51 @@ See [docs/multi-session.md](docs/multi-session.md) for detailed multi-machine co
 
 ---
 
+## PWA Interface
+
+`claude-signal` also ships a **mobile-first Progressive Web App** for real-time session management directly from your phone, accessible over [Tailscale](https://tailscale.com/).
+
+- Live-updating session list with state indicators
+- Real-time output streaming for running sessions
+- Browser notifications when a session needs input
+- Input bar for responding to prompts without SSH
+- Installable to Android / iOS home screen
+
+**Access:** `http://<tailscale-ip>:8080`
+
+**Install on Android:** Chrome → three-dot menu → Add to Home Screen
+
+See [docs/pwa-setup.md](docs/pwa-setup.md) for full setup instructions including Tailscale configuration, token auth, and troubleshooting.
+
+---
+
 ## Architecture
 
 ```
-Signal Group
-    │
-    ▼
-signal-cli (JSON-RPC subprocess)
-    │
-    ▼
-SignalCLIBackend  ──── implements ────  SignalBackend interface
-    │
-    ▼
-Router (parses commands, formats replies)
-    │
-    ▼
-Manager (creates/monitors sessions)
-    │
-    ▼
-tmux sessions  ──── runs ────  claude-code
-    │
-    ▼
-Log files (~/.claude-signal/logs/)
+Signal Group                          Browser / PWA (Tailscale)
+    │                                         │
+    ▼                                         ▼
+signal-cli (JSON-RPC)              HTTP/WebSocket server :8080
+    │                                         │
+    ▼                                         │
+SignalCLIBackend  ──────────────────────────  ┤
+    │                                         │
+    ▼                                         │
+Router (parses commands)           WebSocket Hub (broadcast)
+    │                                         │
+    └──────────────┬──────────────────────────┘
+                   ▼
+            Session Manager
+                   │
+          ┌────────┴────────┐
+          ▼                 ▼
+     tmux sessions     sessions.json
+          │
+          ▼
+     claude-code
+          │
+          ▼
+    Log files (~/.claude-signal/logs/)
 ```
 
 ```mermaid
@@ -183,6 +206,14 @@ session:
   input_idle_timeout: 10        # Seconds of idle output before marking waiting_input
   tail_lines: 20                # Default lines for tail/status commands
   claude_code_bin: claude       # Path to claude-code binary
+
+server:
+  enabled: true                 # Enable the PWA/WebSocket server (default: true)
+  host: 0.0.0.0                 # Bind address (0.0.0.0 = all interfaces incl. Tailscale)
+  port: 8080                    # Listen port
+  token: ""                     # Optional bearer token (empty = no auth)
+  tls_cert: ""                  # Optional TLS certificate path
+  tls_key: ""                   # Optional TLS key path
 ```
 
 ---

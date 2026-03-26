@@ -69,6 +69,16 @@ func (m *Manager) SetNeedsInputHandler(fn func(*Session, string)) {
 	m.onNeedsInput = fn
 }
 
+// StateChangeHandler returns the currently registered state-change callback (may be nil).
+func (m *Manager) StateChangeHandler() func(*Session, State) {
+	return m.onStateChange
+}
+
+// NeedsInputHandler returns the currently registered needs-input callback (may be nil).
+func (m *Manager) NeedsInputHandler() func(*Session, string) {
+	return m.onNeedsInput
+}
+
 // Start creates a new claude-code session for the given task.
 func (m *Manager) Start(ctx context.Context, task, groupID string) (*Session, error) {
 	// Check max sessions (count only running/waiting sessions on this host)

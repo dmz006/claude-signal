@@ -13,6 +13,7 @@ import (
 
 	"github.com/dmz006/claude-signal/internal/config"
 	"github.com/dmz006/claude-signal/internal/router"
+	"github.com/dmz006/claude-signal/internal/server"
 	"github.com/dmz006/claude-signal/internal/session"
 	signalpkg "github.com/dmz006/claude-signal/internal/signal"
 	"github.com/mdp/qrterminal/v3"
@@ -125,8 +126,32 @@ func runStart(_ *cobra.Command, _ []string) error {
 	// Resume monitors for sessions that survived a previous daemon restart
 	mgr.ResumeMonitors(ctx)
 
-	// Build and run the router
+	// Build the router (but don't run it yet — we need to wire callbacks first)
 	r := router.NewRouter(cfg.Hostname, cfg.Signal.GroupID, backend, mgr, cfg.Session.TailLines)
+
+	// Start the PWA/WebSocket server if enabled
+	if cfg.Server.Enabled {
+		httpServer := server.New(&cfg.Server, mgr, cfg.Hostname)
+
+		// Wire combined state-change callbacks: Signal + WS broadcast
+		mgr.SetStateChangeHandler(func(sess *session.Session, old session.State) {
+			r.HandleStateChange(sess, old)
+			httpServer.NotifyStateChange(sess, old)
+		})
+		mgr.SetNeedsInputHandler(func(sess *session.Session, prompt string) {
+			r.HandleNeedsInput(sess, prompt)
+			httpServer.NotifyNeedsInput(sess, prompt)
+		})
+
+		addr := fmt.Sprintf("http://%s:%d", cfg.Server.Host, cfg.Server.Port)
+		fmt.Printf("[%s] PWA server: %s\n", cfg.Hostname, addr)
+
+		go func() {
+			if srvErr := httpServer.Start(ctx); srvErr != nil && srvErr != context.Canceled {
+				fmt.Printf("[%s] PWA server error: %v\n", cfg.Hostname, srvErr)
+			}
+		}()
+	}
 
 	fmt.Printf("[%s] claude-signal v%s started. Listening on group %s\n",
 		cfg.Hostname, Version, cfg.Signal.GroupID)
