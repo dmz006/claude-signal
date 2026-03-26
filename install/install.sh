@@ -197,6 +197,49 @@ install_signal_cli() {
   success "signal-cli installed."
 }
 
+# Install Go (if needed and user consents)
+install_go() {
+  info "Go is required to build claude-signal from source."
+  info "Installing Go via the official installer..."
+
+  local GO_VERSION="1.22.4"
+  local ARCH; ARCH=$(uname -m)
+  local GOARCH
+  case $ARCH in
+    x86_64)  GOARCH="amd64" ;;
+    aarch64) GOARCH="arm64" ;;
+    armv7l)  GOARCH="armv6l" ;;
+    *) error "Unsupported arch for Go install: ${ARCH}" ;;
+  esac
+
+  local GOTARBALL="go${GO_VERSION}.linux-${GOARCH}.tar.gz"
+  local GOURL="https://go.dev/dl/${GOTARBALL}"
+  local TMPGO; TMPGO=$(mktemp -d)
+
+  wget -q --show-progress -O "${TMPGO}/${GOTARBALL}" "${GOURL}" || \
+    curl -fsSL -o "${TMPGO}/${GOTARBALL}" "${GOURL}"
+
+  if $ROOT_INSTALL; then
+    $SUDO rm -rf /usr/local/go
+    $SUDO tar -C /usr/local -xzf "${TMPGO}/${GOTARBALL}"
+    export PATH="/usr/local/go/bin:${PATH}"
+    success "Go ${GO_VERSION} installed to /usr/local/go."
+  else
+    local GODIR="${HOME}/.local/go"
+    rm -rf "${GODIR}"
+    mkdir -p "${HOME}/.local"
+    tar -C "${HOME}/.local" -xzf "${TMPGO}/${GOTARBALL}"
+    # go tarball extracts to 'go/', rename to versioned dir and symlink
+    mv "${HOME}/.local/go" "${HOME}/.local/go-${GO_VERSION}"
+    ln -sfn "${HOME}/.local/go-${GO_VERSION}" "${GODIR}"
+    export PATH="${GODIR}/bin:${PATH}"
+    success "Go ${GO_VERSION} installed to ${GODIR}."
+    warn "Add to your shell profile: export PATH=\"\${HOME}/.local/go/bin:\${PATH}\""
+  fi
+
+  rm -rf "${TMPGO}"
+}
+
 # Install claude-signal binary
 install_binary() {
   info "Installing claude-signal binary..."
@@ -208,15 +251,28 @@ install_binary() {
     mkdir -p "${INSTALL_DIR}"
   fi
 
-  # Try to build from source if Go is available
+  # Detect if we're running from inside the source repo
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  LOCAL_SOURCE=false
+  if [[ -f "${REPO_ROOT}/go.mod" && -f "${REPO_ROOT}/cmd/claude-signal/main.go" ]]; then
+    LOCAL_SOURCE=true
+  fi
+
+  # Build from source if Go is available
   if command -v go &>/dev/null; then
-    info "Go found. Building from source..."
-    TMPBUILD=$(mktemp -d)
-    cd "${TMPBUILD}"
-    git clone --depth 1 "https://github.com/${REPO}.git" .
-    go build -ldflags="-X main.Version=${VERSION}" -o "${INSTALL_DIR}/${BINARY_NAME}" ./cmd/claude-signal/
-    cd - >/dev/null
-    rm -rf "${TMPBUILD}"
+    if $LOCAL_SOURCE; then
+      info "Go found. Building from local source..."
+      go build -C "${REPO_ROOT}" -ldflags="-X main.Version=${VERSION}" \
+        -o "${INSTALL_DIR}/${BINARY_NAME}" ./cmd/claude-signal/
+    else
+      info "Go found. Cloning and building from source..."
+      TMPBUILD=$(mktemp -d)
+      git clone --depth 1 "https://github.com/${REPO}.git" "${TMPBUILD}"
+      go build -C "${TMPBUILD}" -ldflags="-X main.Version=${VERSION}" \
+        -o "${INSTALL_DIR}/${BINARY_NAME}" ./cmd/claude-signal/
+      rm -rf "${TMPBUILD}"
+    fi
     success "Built and installed from source."
     return
   fi
@@ -231,11 +287,39 @@ install_binary() {
   esac
 
   BIN_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BINARY_NAME}-linux-${GOARCH}"
-  wget -q --show-progress -O "${INSTALL_DIR}/${BINARY_NAME}" "${BIN_URL}" || \
-    curl -fsSL -o "${INSTALL_DIR}/${BINARY_NAME}" "${BIN_URL}"
-  chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+  TMPBIN=$(mktemp)
+  if wget -q --show-progress -O "${TMPBIN}" "${BIN_URL}" 2>/dev/null || \
+     curl -fsSL -o "${TMPBIN}" "${BIN_URL}" 2>/dev/null; then
+    $SUDO install -m 755 "${TMPBIN}" "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -f "${TMPBIN}"
+    success "Binary installed to ${INSTALL_DIR}/${BINARY_NAME}."
+    return
+  fi
+  rm -f "${TMPBIN}"
 
-  success "Binary installed to ${INSTALL_DIR}/${BINARY_NAME}."
+  # No prebuilt binary — install Go and build from source
+  warn "No prebuilt binary found for v${VERSION}."
+  if $LOCAL_SOURCE || command -v git &>/dev/null; then
+    install_go
+    if $LOCAL_SOURCE; then
+      info "Building from local source..."
+      go build -C "${REPO_ROOT}" -ldflags="-X main.Version=${VERSION}" \
+        -o "${INSTALL_DIR}/${BINARY_NAME}" ./cmd/claude-signal/
+    else
+      info "Cloning and building from source..."
+      TMPBUILD=$(mktemp -d)
+      git clone --depth 1 "https://github.com/${REPO}.git" "${TMPBUILD}"
+      go build -C "${TMPBUILD}" -ldflags="-X main.Version=${VERSION}" \
+        -o "${INSTALL_DIR}/${BINARY_NAME}" ./cmd/claude-signal/
+      rm -rf "${TMPBUILD}"
+    fi
+    success "Built and installed from source."
+  else
+    error "Cannot install claude-signal: no prebuilt binary for v${VERSION} and git is not available.
+  Options:
+    1. Install Go (https://go.dev/dl/) and re-run this installer.
+    2. Wait for a prebuilt release at https://github.com/${REPO}/releases"
+  fi
 }
 
 # Create directories
