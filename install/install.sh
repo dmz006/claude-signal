@@ -57,19 +57,17 @@ EOF
   exit 0
 fi
 
-# Detect if we have sudo
-HAS_SUDO=false
-if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
-  HAS_SUDO=true
-fi
-
 SUDO=""
 if $ROOT_INSTALL; then
   if [[ $EUID -ne 0 ]]; then
-    if $HAS_SUDO; then
+    if command -v sudo &>/dev/null; then
       SUDO="sudo"
+      # Pre-validate sudo (prompts for password now rather than mid-install)
+      if ! sudo -v; then
+        error "sudo authentication failed. Run as root or omit --root for a user install."
+      fi
     else
-      error "Root install requires sudo. Run as root or omit --root for user install."
+      error "Root install requires sudo or running as root."$'\n'"To install without root, omit --root (installs to ~/.local/bin)."
     fi
   fi
 fi
@@ -122,14 +120,22 @@ install_deps() {
 
   info "Installing dependencies: Java 17+, tmux..."
 
-  # Determine how to elevate privileges
+  # Determine how to elevate privileges for package installation
   local pkg_sudo=""
   if [[ $EUID -ne 0 ]]; then
     if command -v sudo &>/dev/null; then
       pkg_sudo="sudo"
     else
-      warn "Cannot install system packages without root or sudo."
-      warn "Please install Java 17+ and tmux manually, then re-run with --skip-deps."
+      warn "Cannot install system packages: sudo not found and not running as root."
+      warn "Install Java 17+ and tmux manually, then re-run with --skip-deps:"
+      case $PKG_MGR in
+        apt)    warn "  sudo apt-get install -y openjdk-17-jdk-headless tmux" ;;
+        dnf)    warn "  sudo dnf install -y java-17-openjdk-headless tmux" ;;
+        yum)    warn "  sudo yum install -y java-17-openjdk-headless tmux" ;;
+        pacman) warn "  sudo pacman -Sy jdk17-openjdk tmux" ;;
+        zypper) warn "  sudo zypper install -y java-17-openjdk-headless tmux" ;;
+        *)      warn "  Install Java 17+ and tmux via your system package manager." ;;
+      esac
       return 1
     fi
   fi
